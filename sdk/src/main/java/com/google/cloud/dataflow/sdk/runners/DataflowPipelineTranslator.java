@@ -456,6 +456,9 @@ public class DataflowPipelineTranslator {
       if (!Strings.isNullOrEmpty(options.getZone())) {
         workerPool.setZone(options.getZone());
       }
+      if (!Strings.isNullOrEmpty(options.getNetwork())) {
+        workerPool.setNetwork(options.getNetwork());
+      }
       if (options.getDiskSizeGb() > 0) {
         workerPool.setDiskSizeGb(options.getDiskSizeGb());
       }
@@ -843,17 +846,17 @@ public class DataflowPipelineTranslator {
         });
 
     registerTransformTranslator(
-        Create.class,
-        new TransformTranslator<Create>() {
+        Create.Values.class,
+        new TransformTranslator<Create.Values>() {
           @Override
           public void translate(
-              Create transform,
+              Create.Values transform,
               TranslationContext context) {
             createHelper(transform, context);
           }
 
           private <T> void createHelper(
-              Create<T> transform,
+              Create.Values<T> transform,
               TranslationContext context) {
             context.addStep(transform, "CreateCollection");
 
@@ -1030,8 +1033,7 @@ public class DataflowPipelineTranslator {
     registerTransformTranslator(
         TextIO.Write.Bound.class, new TextIOTranslator.WriteTranslator());
 
-    registerTransformTranslator(
-        Read.Bound.class, new ReadTranslator());
+    registerTransformTranslator(Read.Bound.class, new ReadTranslator());
   }
 
   private static void translateInputs(

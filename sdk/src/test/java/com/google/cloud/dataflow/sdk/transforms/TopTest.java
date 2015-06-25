@@ -73,13 +73,13 @@ public class TopTest {
   };
 
   public PCollection<KV<String, Integer>> createInputTable(Pipeline p) {
-    return p.apply(Create.of(Arrays.asList(TABLE))).setCoder(
-        KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()));
+    return p.apply("CreateInputTable", Create.of(Arrays.asList(TABLE)).withCoder(
+        KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())));
   }
 
   public PCollection<KV<String, Integer>> createEmptyInputTable(Pipeline p) {
-    return p.apply(Create.of(Arrays.asList(EMPTY_TABLE))).setCoder(
-        KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()));
+    return p.apply("CreateEmptyInputTable", Create.of(Arrays.asList(EMPTY_TABLE)).withCoder(
+        KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())));
   }
 
   @Test
@@ -87,16 +87,17 @@ public class TopTest {
   public void testTop() {
     Pipeline p = TestPipeline.create();
     PCollection<String> input =
-        p.apply(Create.of(Arrays.asList(COLLECTION)))
-                 .setCoder(StringUtf8Coder.of());
+        p.apply(Create.of(Arrays.asList(COLLECTION))
+                 .withCoder(StringUtf8Coder.of()));
 
     PCollection<List<String>> top1 = input.apply(Top.of(1, new OrderByLength()));
     PCollection<List<String>> top2 = input.apply(Top.<String>largest(2));
     PCollection<List<String>> top3 = input.apply(Top.<String>smallest(3));
 
-    PCollection<KV<String, List<Integer>>> largestPerKey = createInputTable(p)
+    PCollection<KV<String, Integer>> inputTable = createInputTable(p);
+    PCollection<KV<String, List<Integer>>> largestPerKey = inputTable
         .apply(Top.<String, Integer>largestPerKey(2));
-    PCollection<KV<String, List<Integer>>> smallestPerKey = createInputTable(p)
+    PCollection<KV<String, List<Integer>>> smallestPerKey = inputTable
         .apply(Top.<String, Integer>smallestPerKey(2));
 
     DataflowAssert.thatSingletonIterable(top1).containsInAnyOrder(Arrays.asList("bb"));
@@ -117,16 +118,17 @@ public class TopTest {
   public void testTopEmpty() {
     Pipeline p = TestPipeline.create();
     PCollection<String> input =
-        p.apply(Create.of(Arrays.asList(EMPTY_COLLECTION)))
-                 .setCoder(StringUtf8Coder.of());
+        p.apply(Create.of(Arrays.asList(EMPTY_COLLECTION))
+                 .withCoder(StringUtf8Coder.of()));
 
     PCollection<List<String>> top1 = input.apply(Top.of(1, new OrderByLength()));
     PCollection<List<String>> top2 = input.apply(Top.<String>largest(2));
     PCollection<List<String>> top3 = input.apply(Top.<String>smallest(3));
 
-    PCollection<KV<String, List<Integer>>> largestPerKey = createEmptyInputTable(p)
+    PCollection<KV<String, Integer>> inputTable = createEmptyInputTable(p);
+    PCollection<KV<String, List<Integer>>> largestPerKey = inputTable
         .apply(Top.<String, Integer>largestPerKey(2));
-    PCollection<KV<String, List<Integer>>> smallestPerKey = createEmptyInputTable(p)
+    PCollection<KV<String, List<Integer>>> smallestPerKey = inputTable
         .apply(Top.<String, Integer>smallestPerKey(2));
 
     DataflowAssert.thatSingletonIterable(top1).containsInAnyOrder();
@@ -143,17 +145,18 @@ public class TopTest {
   public void testTopZero() {
     Pipeline p = TestPipeline.create();
     PCollection<String> input =
-        p.apply(Create.of(Arrays.asList(COLLECTION)))
-                 .setCoder(StringUtf8Coder.of());
+        p.apply(Create.of(Arrays.asList(COLLECTION))
+                 .withCoder(StringUtf8Coder.of()));
 
     PCollection<List<String>> top1 = input.apply(Top.of(0, new OrderByLength()));
     PCollection<List<String>> top2 = input.apply(Top.<String>largest(0));
     PCollection<List<String>> top3 = input.apply(Top.<String>smallest(0));
 
-    PCollection<KV<String, List<Integer>>> largestPerKey = createInputTable(p)
+    PCollection<KV<String, Integer>> inputTable = createInputTable(p);
+    PCollection<KV<String, List<Integer>>> largestPerKey = inputTable
         .apply(Top.<String, Integer>largestPerKey(0));
 
-    PCollection<KV<String, List<Integer>>> smallestPerKey = createInputTable(p)
+    PCollection<KV<String, List<Integer>>> smallestPerKey = inputTable
         .apply(Top.<String, Integer>smallestPerKey(0));
 
     DataflowAssert.thatSingletonIterable(top1).containsInAnyOrder();
@@ -173,15 +176,16 @@ public class TopTest {
   @Test
   public void testPerKeySerializabilityRequirement() {
     Pipeline p = TestPipeline.create();
-    p.apply(Create.of(Arrays.asList(COLLECTION)))
-            .setCoder(StringUtf8Coder.of());
+    p.apply("CreateCollection", Create.of(Arrays.asList(COLLECTION))
+        .withCoder(StringUtf8Coder.of()));
 
-    createInputTable(p)
+    PCollection<KV<String, Integer>> inputTable = createInputTable(p);
+    inputTable
         .apply(Top.<String, Integer, IntegerComparator>perKey(1,
             new IntegerComparator()));
 
-    createInputTable(p)
-        .apply(Top.<String, Integer, IntegerComparator2>perKey(1,
+    inputTable
+        .apply("PerKey2", Top.<String, Integer, IntegerComparator2>perKey(1,
             new IntegerComparator2()));
   }
 
@@ -189,8 +193,8 @@ public class TopTest {
   public void testCountConstraint() {
     Pipeline p = TestPipeline.create();
     PCollection<String> input =
-        p.apply(Create.of(Arrays.asList(COLLECTION)))
-            .setCoder(StringUtf8Coder.of());
+        p.apply(Create.of(Arrays.asList(COLLECTION))
+            .withCoder(StringUtf8Coder.of()));
 
     expectedEx.expect(IllegalArgumentException.class);
     expectedEx.expectMessage(Matchers.containsString(">= 0"));
@@ -202,8 +206,8 @@ public class TopTest {
   public void testTransformName() {
     Pipeline p = TestPipeline.create();
     PCollection<String> input =
-        p.apply(Create.of(Arrays.asList(COLLECTION)))
-            .setCoder(StringUtf8Coder.of());
+        p.apply(Create.of(Arrays.asList(COLLECTION))
+            .withCoder(StringUtf8Coder.of()));
 
     PTransform<PCollection<String>, PCollection<List<String>>> top = Top
         .of(10, new OrderByLength());

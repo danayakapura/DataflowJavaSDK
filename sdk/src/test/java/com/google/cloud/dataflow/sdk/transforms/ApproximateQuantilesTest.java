@@ -17,7 +17,6 @@
 package com.google.cloud.dataflow.sdk.transforms;
 
 import static com.google.cloud.dataflow.sdk.TestUtils.checkCombineFn;
-import static com.google.cloud.dataflow.sdk.TestUtils.createInts;
 import static org.hamcrest.collection.IsIterableContainingInOrder.contains;
 
 import com.google.cloud.dataflow.sdk.Pipeline;
@@ -61,8 +60,8 @@ public class ApproximateQuantilesTest {
   );
 
   public PCollection<KV<String, Integer>> createInputTable(Pipeline p) {
-    return p.apply(Create.of(TABLE)).setCoder(
-        KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()));
+    return p.apply(Create.of(TABLE).withCoder(
+        KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())));
   }
 
   @Test
@@ -274,7 +273,7 @@ public class ApproximateQuantilesTest {
   }
 
   private PCollection<Integer> intRangeCollection(Pipeline p, int size) {
-    return createInts(p, intRange(size));
+    return p.apply("CreateIntsUpTo(" + size + ")", Create.of(intRange(size)));
   }
 
   private List<Integer> intRange(int size) {

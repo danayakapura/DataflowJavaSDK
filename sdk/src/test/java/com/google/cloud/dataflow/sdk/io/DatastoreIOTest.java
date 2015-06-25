@@ -24,6 +24,7 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import com.google.api.services.datastore.DatastoreV1;
@@ -37,9 +38,9 @@ import com.google.cloud.dataflow.sdk.Pipeline;
 import com.google.cloud.dataflow.sdk.coders.EntityCoder;
 import com.google.cloud.dataflow.sdk.io.DatastoreIO.DatastoreWriter;
 import com.google.cloud.dataflow.sdk.options.DataflowPipelineOptions;
+import com.google.cloud.dataflow.sdk.options.PipelineOptions;
 import com.google.cloud.dataflow.sdk.options.PipelineOptionsFactory;
 import com.google.cloud.dataflow.sdk.runners.DirectPipeline;
-import com.google.cloud.dataflow.sdk.testing.RunnableOnService;
 import com.google.cloud.dataflow.sdk.transforms.Create;
 import com.google.cloud.dataflow.sdk.transforms.Write;
 import com.google.cloud.dataflow.sdk.util.TestCredential;
@@ -47,15 +48,16 @@ import com.google.common.collect.Lists;
 
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 /**
  * Tests for DatastoreIO Read and Write transforms.
@@ -100,7 +102,6 @@ public class DatastoreIOTest {
    * Test for reading one entity from kind "food".
    */
   @Test
-  @Category(RunnableOnService.class)
   public void testBuildRead() throws Exception {
     DatastoreIO.Source readQuery =
         DatastoreIO.read().withHost(this.host).withDataset(this.datasetId).withQuery(this.query);
@@ -165,6 +166,120 @@ public class DatastoreIOTest {
       assertEquals("mykind", bundleQuery.getKind(0).getName());
       assertEquals(i, bundleQuery.getFilter().getPropertyFilter().getValue().getIntegerValue());
     }
+  }
+
+  @Test
+  public void testQuerySplitWithZeroSize() throws Exception {
+    String dataset = "mydataset";
+    DatastoreV1.KindExpression mykind =
+        DatastoreV1.KindExpression.newBuilder().setName("mykind").build();
+    Query query = Query.newBuilder().addKind(mykind).build();
+
+    DataflowPipelineOptions options =
+        PipelineOptionsFactory.create().as(DataflowPipelineOptions.class);
+    options.setGcpCredential(new TestCredential());
+
+    List<Query> mockSplits = Lists.newArrayList(
+        Query.newBuilder()
+            .addKind(mykind)
+            .build());
+
+    QuerySplitter splitter = mock(QuerySplitter.class);
+    when(splitter.getSplits(any(Query.class), eq(1), any(Datastore.class))).thenReturn(mockSplits);
+
+    DatastoreIO.Source io =
+        DatastoreIO.read()
+            .withDataset(dataset)
+            .withQuery(query)
+            .withMockSplitter(splitter)
+            .withMockEstimateSizeBytes(0L);
+
+    List<DatastoreIO.Source> bundles = io.splitIntoBundles(1024, options);
+    assertEquals(1, bundles.size());
+    DatastoreIO.Source bundle = bundles.get(0);
+    Query bundleQuery = bundle.query;
+    assertEquals("mykind", bundleQuery.getKind(0).getName());
+  }
+
+  @Test
+  public void testQuerySplitSizeUnavailable() throws Exception {
+    String dataset = "mydataset";
+    DatastoreV1.KindExpression mykind =
+        DatastoreV1.KindExpression.newBuilder().setName("mykind").build();
+    Query query = Query.newBuilder().addKind(mykind).build();
+
+    DataflowPipelineOptions options =
+        PipelineOptionsFactory.create().as(DataflowPipelineOptions.class);
+    options.setGcpCredential(new TestCredential());
+    options.setNumWorkers(2);
+
+    List<Query> mockSplits = new ArrayList<>();
+    for (int i = 0; i < 2; i++) {
+      mockSplits.add(
+          Query.newBuilder()
+              .addKind(mykind)
+              .setFilter(
+                  DatastoreHelper.makeFilter("foo", DatastoreV1.PropertyFilter.Operator.EQUAL,
+                      DatastoreV1.Value.newBuilder().setIntegerValue(i).build()))
+              .build());
+    }
+
+    QuerySplitter splitter = mock(QuerySplitter.class);
+    when(splitter.getSplits(any(Query.class), eq(2), any(Datastore.class))).thenReturn(mockSplits);
+
+    DatastoreIO.Source io =
+        DatastoreIO.read()
+            .withDataset(dataset)
+            .withQuery(query)
+            .withMockSplitter(splitter)
+            .withMockEstimateSizeBytes(8 * 1024L);
+
+    DatastoreIO.Source spiedIo = spy(io);
+    when(spiedIo.getEstimatedSizeBytes(any(PipelineOptions.class))).thenThrow(new IOException());
+
+    List<DatastoreIO.Source> bundles = spiedIo.splitIntoBundles(1024, options);
+    assertEquals(2, bundles.size());
+    for (int i = 0; i < 2; ++i) {
+      DatastoreIO.Source bundle = bundles.get(i);
+      Query bundleQuery = bundle.query;
+      assertEquals("mykind", bundleQuery.getKind(0).getName());
+      assertEquals(i, bundleQuery.getFilter().getPropertyFilter().getValue().getIntegerValue());
+    }
+  }
+
+  @Test
+  public void testQuerySplitNoWorkers() throws Exception {
+    String dataset = "mydataset";
+    DatastoreV1.KindExpression mykind =
+        DatastoreV1.KindExpression.newBuilder().setName("mykind").build();
+    Query query = Query.newBuilder().addKind(mykind).build();
+
+    DataflowPipelineOptions options =
+        PipelineOptionsFactory.create().as(DataflowPipelineOptions.class);
+    options.setGcpCredential(new TestCredential());
+    options.setNumWorkers(0);
+
+    List<Query> mockSplits = Lists.newArrayList(Query.newBuilder().addKind(mykind).build());
+
+    QuerySplitter splitter = mock(QuerySplitter.class);
+    when(splitter.getSplits(any(Query.class), eq(1), any(Datastore.class))).thenReturn(mockSplits);
+
+    DatastoreIO.Source io =
+        DatastoreIO.read()
+            .withDataset(dataset)
+            .withQuery(query)
+            .withMockSplitter(splitter)
+            .withMockEstimateSizeBytes(8 * 1024L);
+
+    DatastoreIO.Source spiedIo = spy(io);
+    when(spiedIo.getEstimatedSizeBytes(any(PipelineOptions.class)))
+        .thenThrow(new NoSuchElementException());
+
+    List<DatastoreIO.Source> bundles = spiedIo.splitIntoBundles(1024, options);
+    assertEquals(1, bundles.size());
+    DatastoreIO.Source bundle = bundles.get(0);
+    Query bundleQuery = bundle.query;
+    assertEquals("mykind", bundleQuery.getKind(0).getName());
   }
 
   @Test
@@ -239,7 +354,7 @@ public class DatastoreIOTest {
   public void testBuildWriteWithoutDatastoreToCatchException() throws Exception {
     // create pipeline and run the pipeline to get result
     Pipeline p = DirectPipeline.createForTest();
-    p.apply(Create.<Entity>of()).setCoder(EntityCoder.of()).apply(Write.to(DatastoreIO.sink()));
+    p.apply(Create.<Entity>of().withCoder(EntityCoder.of())).apply(Write.to(DatastoreIO.sink()));
   }
 
   /**

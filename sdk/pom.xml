@@ -146,8 +146,6 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-javadoc-plugin</artifactId>
-        <version>2.10.3</version>
-
         <configuration>
           <windowtitle>Google Cloud Dataflow SDK ${project.version} API</windowtitle>
           <doctitle>Google Cloud Dataflow SDK ${project.version} API</doctitle>
@@ -189,7 +187,6 @@
             </offlineLink>
           </offlineLinks>
         </configuration>
-
         <executions>
           <execution>
             <goals>
@@ -332,7 +329,7 @@
     <dependency>
       <groupId>com.google.apis</groupId>
       <artifactId>google-api-services-dataflow</artifactId>
-      <version>v1beta3-rev12-1.19.1</version>
+      <version>v1b3-rev4-1.19.1</version>
       <exclusions>
         <!-- Exclude an old version of guava that is being pulled
              in by a transitive dependency google-api-client 1.19.0 -->
@@ -346,7 +343,7 @@
     <dependency>
       <groupId>com.google.cloud.dataflow</groupId>
       <artifactId>google-cloud-dataflow-java-proto-library-all</artifactId>
-      <version>0.4.150515</version>
+      <version>0.4.150612</version>
     </dependency>
 
     <dependency>
@@ -392,7 +389,7 @@
     <dependency>
       <groupId>com.google.apis</groupId>
       <artifactId>google-api-services-pubsub</artifactId>
-      <version>v1beta1-rev18-1.19.1</version>
+      <version>v1beta2-rev1-1.19.1</version>
       <exclusions>
         <!-- Exclude an old version of guava that is being pulled
              in by a transitive dependency google-api-client 1.19.0 -->

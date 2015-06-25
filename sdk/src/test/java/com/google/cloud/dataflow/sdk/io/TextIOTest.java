@@ -218,7 +218,7 @@ public class TextIOTest {
     Pipeline p = TestPipeline.create();
 
     PCollection<T> input =
-        p.apply(Create.of(Arrays.asList(elems))).setCoder(coder);
+        p.apply(Create.of(Arrays.asList(elems)).withCoder(coder));
 
     TextIO.Write.Bound<T> write;
     if (coder.equals(StringUtf8Coder.of())) {
@@ -285,8 +285,8 @@ public class TextIOTest {
     Pipeline p = TestPipeline.create();
 
     PCollection<String> input =
-        p.apply(Create.of(Arrays.asList(LINES_ARRAY)))
-            .setCoder(StringUtf8Coder.of());
+        p.apply(Create.of(Arrays.asList(LINES_ARRAY))
+            .withCoder(StringUtf8Coder.of()));
 
     input.apply(TextIO.Write.to(filename).withNumShards(2).withSuffix(".txt"));
 
@@ -329,8 +329,8 @@ public class TextIOTest {
     Pipeline p = TestPipeline.create();
 
     PCollection<String> input =
-        p.apply(Create.of(Arrays.asList(LINES_ARRAY)))
-            .setCoder(StringUtf8Coder.of());
+        p.apply(Create.of(Arrays.asList(LINES_ARRAY))
+            .withCoder(StringUtf8Coder.of()));
 
     expectedException.expect(IllegalArgumentException.class);
     expectedException.expectMessage("Output name components are not allowed to contain");
@@ -342,29 +342,32 @@ public class TextIOTest {
    */
   @Test
   public void testGoodWildcards() throws Exception {
-
     TestDataflowPipelineOptions options = buildTestPipelineOptions();
     options.setGcsUtil(buildMockGcsUtil());
 
     Pipeline pipeline = Pipeline.create(options);
 
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/*"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/?"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/[0-9]"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/*baz*"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/*baz?"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/[0-9]baz?"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/baz/*"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/baz/*wonka*"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/*baz/wonka*"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo*/baz"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo?/baz"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo[0-9]/baz"));
+    applyRead(pipeline, "gs://bucket/foo");
+    applyRead(pipeline, "gs://bucket/foo/");
+    applyRead(pipeline, "gs://bucket/foo/*");
+    applyRead(pipeline, "gs://bucket/foo/?");
+    applyRead(pipeline, "gs://bucket/foo/[0-9]");
+    applyRead(pipeline, "gs://bucket/foo/*baz*");
+    applyRead(pipeline, "gs://bucket/foo/*baz?");
+    applyRead(pipeline, "gs://bucket/foo/[0-9]baz?");
+    applyRead(pipeline, "gs://bucket/foo/baz/*");
+    applyRead(pipeline, "gs://bucket/foo/baz/*wonka*");
+    applyRead(pipeline, "gs://bucket/foo/*baz/wonka*");
+    applyRead(pipeline, "gs://bucket/foo*/baz");
+    applyRead(pipeline, "gs://bucket/foo?/baz");
+    applyRead(pipeline, "gs://bucket/foo[0-9]/baz");
 
     // Check that running doesn't fail.
     pipeline.run();
+  }
+
+  private void applyRead(Pipeline pipeline, String path) {
+    pipeline.apply("Read(" + path + ")", TextIO.Read.from(path));
   }
 
   /**

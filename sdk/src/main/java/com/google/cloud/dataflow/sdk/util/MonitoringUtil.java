@@ -18,7 +18,7 @@ package com.google.cloud.dataflow.sdk.util;
 import static com.google.cloud.dataflow.sdk.util.TimeUtil.fromCloudTime;
 
 import com.google.api.services.dataflow.Dataflow;
-import com.google.api.services.dataflow.Dataflow.V1b3.Projects.Jobs.Messages;
+import com.google.api.services.dataflow.Dataflow.Projects.Jobs.Messages;
 import com.google.api.services.dataflow.model.JobMessage;
 import com.google.api.services.dataflow.model.ListJobMessagesResponse;
 import com.google.cloud.dataflow.sdk.PipelineResult.State;
@@ -45,6 +45,8 @@ import javax.annotation.Nullable;
 public final class MonitoringUtil {
 
   private static final String GCLOUD_DATAFLOW_PREFIX = "gcloud alpha dataflow";
+  private static final String ENDPOINT_OVERRIDE_ENV_VAR =
+      "CLOUDSDK_API_ENDPOINT_OVERRIDES_DATAFLOW";
 
   private static final Map<String, State> DATAFLOW_STATE_TO_JOB_STATE =
       ImmutableMap
@@ -95,6 +97,8 @@ public final class MonitoringUtil {
           importanceString = "Error:   ";
         } else if (message.getMessageImportance().equals("JOB_MESSAGE_WARNING")) {
           importanceString = "Warning: ";
+        } else if (message.getMessageImportance().equals("JOB_MESSAGE_BASIC")) {
+          importanceString = "Basic:  ";
         } else if (message.getMessageImportance().equals("JOB_MESSAGE_DETAILED")) {
           importanceString = "Detail:  ";
         } else {
@@ -119,7 +123,7 @@ public final class MonitoringUtil {
 
   /** Construct a helper for monitoring. */
   public MonitoringUtil(String projectId, Dataflow dataflow) {
-    this(projectId, dataflow.v1b3().projects().jobs().messages());
+    this(projectId, dataflow.projects().jobs().messages());
   }
 
   // @VisibleForTesting
@@ -204,6 +208,10 @@ public final class MonitoringUtil {
       // Should never happen.
       throw new AssertionError("UTF-8 encoding is not supported by the environment", e);
     }
+  }
+
+  public static String getEndpointOverridePrefixCommand(String endpoint) {
+    return String.format("%s=%s ", ENDPOINT_OVERRIDE_ENV_VAR, endpoint);
   }
 
   public static String getGcloudCancelCommand(String projectName, String jobId) {

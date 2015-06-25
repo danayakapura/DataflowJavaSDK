@@ -14,22 +14,26 @@
 
 package com.google.cloud.dataflow.sdk.io;
 
-import static com.google.cloud.dataflow.sdk.io.SourceTestUtils.ExpectedSplitOutcome.MUST_BE_CONSISTENT_IF_SUCCEEDS;
-import static com.google.cloud.dataflow.sdk.io.SourceTestUtils.assertSplitAtFractionBehavior;
+import static com.google.cloud.dataflow.sdk.io.SourceTestUtils.assertSplitAtFractionExhaustive;
 import static com.google.cloud.dataflow.sdk.io.SourceTestUtils.assertSplitAtFractionFails;
 import static com.google.cloud.dataflow.sdk.io.SourceTestUtils.assertSplitAtFractionSucceedsAndConsistent;
+import static org.hamcrest.Matchers.both;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.containsString;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 import com.google.cloud.dataflow.sdk.Pipeline;
 import com.google.cloud.dataflow.sdk.io.Source.Reader;
+import com.google.cloud.dataflow.sdk.options.PipelineOptions;
+import com.google.cloud.dataflow.sdk.options.PipelineOptionsFactory;
 import com.google.cloud.dataflow.sdk.testing.DataflowAssert;
 import com.google.cloud.dataflow.sdk.testing.TestPipeline;
 import com.google.cloud.dataflow.sdk.values.PCollection;
 import com.google.common.collect.ImmutableList;
 
+import org.hamcrest.Matchers;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -230,17 +234,17 @@ public class XmlSourceTest {
 
   private File createRandomTrainXML(String fileName, List<Train> trains) throws IOException {
     File file = tempFolder.newFile(fileName);
-    BufferedWriter writer = new BufferedWriter(new FileWriter(file));
-    writer.write("<trains>");
-    writer.newLine();
-    for (Train train : trains) {
-      String str = trainToXMLElement(train);
-      writer.write(str);
+    try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+      writer.write("<trains>");
+      writer.newLine();
+      for (Train train : trains) {
+        String str = trainToXMLElement(train);
+        writer.write(str);
+        writer.newLine();
+      }
+      writer.write("</trains>");
       writer.newLine();
     }
-    writer.write("</trains>");
-    writer.newLine();
-    writer.close();
     return file;
   }
 
@@ -476,14 +480,16 @@ public class XmlSourceTest {
             .withRecordClass(WrongTrainType.class);
 
     exception.expect(RuntimeException.class);
-    exception.expectMessage(
-        "unexpected element (uri:\"\", local:\"name\"). Expected elements are <{}something>");
-    Reader<WrongTrainType> reader = source.createReader(null, null);
 
-    List<WrongTrainType> results = new ArrayList<>();
-    for (boolean available = reader.start(); available; available = reader.advance()) {
-      WrongTrainType train = reader.getCurrent();
-      results.add(train);
+    // JAXB internationalizes the error message. So this is all we can match for.
+    exception.expectMessage(both(containsString("name")).and(Matchers.containsString("something")));
+    try (Reader<WrongTrainType> reader = source.createReader(null, null)) {
+
+      List<WrongTrainType> results = new ArrayList<>();
+      for (boolean available = reader.start(); available; available = reader.advance()) {
+        WrongTrainType train = reader.getCurrent();
+        results.add(train);
+      }
     }
   }
 
@@ -692,6 +698,7 @@ public class XmlSourceTest {
 
   @Test
   public void testSplitAtFraction() throws Exception {
+    PipelineOptions options = PipelineOptionsFactory.create();
     String fileName = "temp.xml";
     List<Train> trains = generateRandomTrainList(100);
     File file = createRandomTrainXML(fileName, trains);
@@ -707,19 +714,20 @@ public class XmlSourceTest {
         fileSource.splitIntoBundles(file.length() / 3, null);
     for (BoundedSource<Train> splitSource : splits) {
       int items = readEverythingFromReader(splitSource.createReader(null, null)).size();
-      assertSplitAtFractionSucceedsAndConsistent(splitSource, 0, 0.7);
-      assertSplitAtFractionSucceedsAndConsistent(splitSource, 1, 0.7);
-      assertSplitAtFractionSucceedsAndConsistent(splitSource, 15, 0.7);
-      assertSplitAtFractionFails(splitSource, 0, 0.0);
-      assertSplitAtFractionFails(splitSource, 20, 0.3);
-      assertSplitAtFractionFails(splitSource, items, 1.0);
-      assertSplitAtFractionFails(splitSource, items, 0.9);
-      assertSplitAtFractionSucceedsAndConsistent(splitSource, items, 0.999);
+      assertSplitAtFractionSucceedsAndConsistent(splitSource, 0, 0.7, options);
+      assertSplitAtFractionSucceedsAndConsistent(splitSource, 1, 0.7, options);
+      assertSplitAtFractionSucceedsAndConsistent(splitSource, 15, 0.7, options);
+      assertSplitAtFractionFails(splitSource, 0, 0.0, options);
+      assertSplitAtFractionFails(splitSource, 20, 0.3, options);
+      assertSplitAtFractionFails(splitSource, items, 1.0, options);
+      assertSplitAtFractionFails(splitSource, items, 0.9, options);
+      assertSplitAtFractionSucceedsAndConsistent(splitSource, items, 0.999, options);
     }
   }
 
   @Test
   public void testSplitAtFractionExhaustive() throws Exception {
+    PipelineOptions options = PipelineOptionsFactory.create();
     File file = tempFolder.newFile("trainXMLSmall");
     Files.write(file.toPath(), trainXMLWithAllFeatures.getBytes(StandardCharsets.UTF_8));
 
@@ -729,18 +737,7 @@ public class XmlSourceTest {
             .withRecordElement("train")
             .withRecordClass(Train.class)
             .withMinBundleSize(1024);
-    List<? extends FileBasedSource<Train>> splits =
-        source.splitIntoBundles(file.length() / 3, null);
-
-    for (BoundedSource<Train> splitSource : splits) {
-      int maxItems = readEverythingFromReader(splitSource.createReader(null, null)).size();
-      for (int numItems = 0; numItems <= maxItems; ++numItems) {
-        for (double splitFraction = 0.0; splitFraction < 1.1; splitFraction += 0.01) {
-          assertSplitAtFractionBehavior(
-              splitSource, numItems, splitFraction, MUST_BE_CONSISTENT_IF_SUCCEEDS);
-        }
-      }
-    }
+    assertSplitAtFractionExhaustive(source, options);
   }
 
   @Test

@@ -74,8 +74,8 @@ public class GroupByKeyTest {
     Pipeline p = TestPipeline.create();
 
     PCollection<KV<String, Integer>> input =
-        p.apply(Create.of(ungroupedPairs))
-        .setCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()));
+        p.apply(Create.of(ungroupedPairs)
+            .withCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())));
 
     PCollection<KV<String, Iterable<Integer>>> output =
         input.apply(GroupByKey.<String, Integer>create());
@@ -116,8 +116,8 @@ public class GroupByKeyTest {
     Pipeline p = TestPipeline.create();
 
     PCollection<KV<String, Integer>> input =
-        p.apply(Create.timestamped(ungroupedPairs, Arrays.asList(1L, 2L, 3L, 4L, 5L, 6L, 7L)))
-        .setCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()));
+        p.apply(Create.timestamped(ungroupedPairs, Arrays.asList(1L, 2L, 3L, 4L, 5L, 6L, 7L))
+            .withCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())));
     PCollection<KV<String, Iterable<Integer>>> output =
         input.apply(Window.<KV<String, Integer>>into(FixedWindows.of(new Duration(5))))
              .apply(GroupByKey.<String, Integer>create());
@@ -153,8 +153,8 @@ public class GroupByKeyTest {
     Pipeline p = TestPipeline.create();
 
     PCollection<KV<String, Integer>> input =
-        p.apply(Create.of(ungroupedPairs))
-        .setCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()));
+        p.apply(Create.of(ungroupedPairs)
+            .withCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())));
 
     PCollection<KV<String, Iterable<Integer>>> output =
         input.apply(GroupByKey.<String, Integer>create());
@@ -175,10 +175,10 @@ public class GroupByKeyTest {
     Pipeline p = TestPipeline.create();
 
     PCollection<KV<Map<String, String>, Integer>> input =
-        p.apply(Create.of(ungroupedPairs))
-        .setCoder(
-            KvCoder.of(MapCoder.of(StringUtf8Coder.of(), StringUtf8Coder.of()),
-                BigEndianIntegerCoder.of()));
+        p.apply(Create.of(ungroupedPairs)
+            .withCoder(
+                KvCoder.of(MapCoder.of(StringUtf8Coder.of(), StringUtf8Coder.of()),
+                    BigEndianIntegerCoder.of())));
 
     input.apply(GroupByKey.<Map<String, String>, Integer>create());
 
@@ -192,8 +192,8 @@ public class GroupByKeyTest {
     List<KV<String, Integer>> ungroupedPairs = Arrays.asList();
 
     PCollection<KV<String, Integer>> input =
-        p.apply(Create.of(ungroupedPairs))
-        .setCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()))
+        p.apply(Create.of(ungroupedPairs)
+            .withCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())))
         .apply(Window.<KV<String, Integer>>into(FixedWindows.of(Duration.standardMinutes(1))));
 
     PCollection<KV<String, Iterable<Integer>>> output =
@@ -212,8 +212,8 @@ public class GroupByKeyTest {
     List<KV<String, Integer>> ungroupedPairs = Arrays.asList();
 
     PCollection<KV<String, Integer>> input =
-        p.apply(Create.of(ungroupedPairs))
-        .setCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()))
+        p.apply(Create.of(ungroupedPairs)
+            .withCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())))
         .apply(Window.<KV<String, Integer>>into(
             Sessions.withGapDuration(Duration.standardMinutes(1))));
 
@@ -237,15 +237,15 @@ public class GroupByKeyTest {
     List<KV<String, Integer>> ungroupedPairs = Arrays.asList();
 
     PCollection<KV<String, Integer>> input =
-        p.apply(Create.of(ungroupedPairs))
-        .setCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()))
+        p.apply(Create.of(ungroupedPairs)
+            .withCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())))
         .apply(Window.<KV<String, Integer>>into(
             Sessions.withGapDuration(Duration.standardMinutes(1))));
 
     try {
-      PCollection<KV<String, Iterable<Iterable<Integer>>>> output = input
-          .apply(GroupByKey.<String, Integer>create())
-          .apply(GroupByKey.<String, Iterable<Integer>>create());
+      input
+          .apply("GroupByKey", GroupByKey.<String, Integer>create())
+          .apply("GroupByKeyAgain", GroupByKey.<String, Iterable<Integer>>create());
       Assert.fail("Exception should have been thrown");
     } catch (IllegalStateException e) {
       Assert.assertTrue(e.getMessage().startsWith(
@@ -260,16 +260,16 @@ public class GroupByKeyTest {
     List<KV<String, Integer>> ungroupedPairs = Arrays.asList();
 
     PCollection<KV<String, Integer>> input =
-        p.apply(Create.of(ungroupedPairs))
-        .setCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()))
+        p.apply(Create.of(ungroupedPairs)
+            .withCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())))
         .apply(Window.<KV<String, Integer>>into(
             Sessions.withGapDuration(Duration.standardMinutes(1))));
 
     PCollection<KV<String, Iterable<Iterable<Integer>>>> middle = input
-        .apply(GroupByKey.<String, Integer>create())
-        .apply(Window.<KV<String, Iterable<Integer>>>remerge())
-        .apply(GroupByKey.<String, Iterable<Integer>>create())
-        .apply(Window.<KV<String, Iterable<Iterable<Integer>>>>remerge());
+        .apply("GroupByKey", GroupByKey.<String, Integer>create())
+        .apply("Remerge", Window.<KV<String, Iterable<Integer>>>remerge())
+        .apply("GroupByKeyAgain", GroupByKey.<String, Iterable<Integer>>create())
+        .apply("RemergeAgain", Window.<KV<String, Iterable<Iterable<Integer>>>>remerge());
 
     p.run();
 

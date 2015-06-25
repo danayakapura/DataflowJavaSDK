@@ -20,6 +20,7 @@ import static com.google.cloud.dataflow.sdk.util.Structs.addObject;
 import static com.google.cloud.dataflow.sdk.util.Structs.getDictionary;
 import static com.google.cloud.dataflow.sdk.util.Structs.getString;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.mockito.Matchers.argThat;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
@@ -114,14 +115,12 @@ public class DataflowPipelineTranslatorTest {
   private static Dataflow buildMockDataflow(
       ArgumentMatcher<Job> jobMatcher) throws IOException {
     Dataflow mockDataflowClient = mock(Dataflow.class);
-    Dataflow.V1b3 mockV1b3 = mock(Dataflow.V1b3.class);
-    Dataflow.V1b3.Projects mockProjects = mock(Dataflow.V1b3.Projects.class);
-    Dataflow.V1b3.Projects.Jobs mockJobs = mock(Dataflow.V1b3.Projects.Jobs.class);
-    Dataflow.V1b3.Projects.Jobs.Create mockRequest = mock(
-        Dataflow.V1b3.Projects.Jobs.Create.class);
+    Dataflow.Projects mockProjects = mock(Dataflow.Projects.class);
+    Dataflow.Projects.Jobs mockJobs = mock(Dataflow.Projects.Jobs.class);
+    Dataflow.Projects.Jobs.Create mockRequest = mock(
+        Dataflow.Projects.Jobs.Create.class);
 
-    when(mockDataflowClient.v1b3()).thenReturn(mockV1b3);
-    when(mockV1b3.projects()).thenReturn(mockProjects);
+    when(mockDataflowClient.projects()).thenReturn(mockProjects);
     when(mockProjects.jobs()).thenReturn(mockJobs);
     when(mockJobs.create(eq("someProject"), argThat(jobMatcher)))
         .thenReturn(mockRequest);
@@ -165,8 +164,43 @@ public class DataflowPipelineTranslatorTest {
           .put("tempLocation", "gs://somebucket/some/path")
           .put("filesToStage", ImmutableList.of())
           .put("stagingLocation", "gs://somebucket/some/path/staging")
+          .put("stableUniqueNames", "WARNING")
           .build()),
         job.getEnvironment().getSdkPipelineOptions());
+  }
+
+  @Test
+  public void testNetworkConfig() throws IOException {
+    final String testNetwork = "test-network";
+
+    DataflowPipelineOptions options = buildPipelineOptions();
+    options.setNetwork(testNetwork);
+
+    Pipeline p = buildPipeline(options);
+    p.traverseTopologically(new RecordingPipelineVisitor());
+    Job job =
+        DataflowPipelineTranslator.fromOptions(options)
+            .translate(p, Collections.<DataflowPackage>emptyList())
+            .getJob();
+
+    assertEquals(1, job.getEnvironment().getWorkerPools().size());
+    assertEquals(testNetwork,
+        job.getEnvironment().getWorkerPools().get(0).getNetwork());
+  }
+
+  @Test
+  public void testNetworkConfigMissing() throws IOException {
+    DataflowPipelineOptions options = buildPipelineOptions();
+
+    Pipeline p = buildPipeline(options);
+    p.traverseTopologically(new RecordingPipelineVisitor());
+    Job job =
+        DataflowPipelineTranslator.fromOptions(options)
+            .translate(p, Collections.<DataflowPackage>emptyList())
+            .getJob();
+
+    assertEquals(1, job.getEnvironment().getWorkerPools().size());
+    assertNull(job.getEnvironment().getWorkerPools().get(0).getNetwork());
   }
 
   @Test
@@ -175,7 +209,6 @@ public class DataflowPipelineTranslatorTest {
 
     DataflowPipelineOptions options = buildPipelineOptions();
     options.setZone(testZone);
-    options.setRunner(DataflowPipelineRunner.class);
 
     Pipeline p = buildPipeline(options);
     p.traverseTopologically(new RecordingPipelineVisitor());
@@ -471,23 +504,27 @@ public class DataflowPipelineTranslatorTest {
     Pipeline pipeline = DataflowPipeline.create(options);
     DataflowPipelineTranslator t = DataflowPipelineTranslator.fromOptions(options);
 
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/*"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/?"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/[0-9]"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/*baz*"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/*baz?"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/[0-9]baz?"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/baz/*"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/baz/*wonka*"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo/*/baz*"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo*/baz"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo?/baz"));
-    pipeline.apply(TextIO.Read.from("gs://bucket/foo[0-9]/baz"));
+    applyRead(pipeline, "gs://bucket/foo");
+    applyRead(pipeline, "gs://bucket/foo/");
+    applyRead(pipeline, "gs://bucket/foo/*");
+    applyRead(pipeline, "gs://bucket/foo/?");
+    applyRead(pipeline, "gs://bucket/foo/[0-9]");
+    applyRead(pipeline, "gs://bucket/foo/*baz*");
+    applyRead(pipeline, "gs://bucket/foo/*baz?");
+    applyRead(pipeline, "gs://bucket/foo/[0-9]baz?");
+    applyRead(pipeline, "gs://bucket/foo/baz/*");
+    applyRead(pipeline, "gs://bucket/foo/baz/*wonka*");
+    applyRead(pipeline, "gs://bucket/foo/*baz/wonka*");
+    applyRead(pipeline, "gs://bucket/foo*/baz");
+    applyRead(pipeline, "gs://bucket/foo?/baz");
+    applyRead(pipeline, "gs://bucket/foo[0-9]/baz");
 
     // Check that translation doesn't fail.
     t.translate(pipeline, Collections.<DataflowPackage>emptyList());
+  }
+
+  private void applyRead(Pipeline pipeline, String path) {
+    pipeline.apply("Read(" + path + ")", TextIO.Read.from(path));
   }
 
   /**

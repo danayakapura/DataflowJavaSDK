@@ -25,6 +25,7 @@ import com.google.api.services.dataflow.model.ListJobsResponse;
 import com.google.cloud.dataflow.sdk.Pipeline;
 import com.google.cloud.dataflow.sdk.PipelineResult.State;
 import com.google.cloud.dataflow.sdk.annotations.Experimental;
+import com.google.cloud.dataflow.sdk.options.DataflowPipelineDebugOptions;
 import com.google.cloud.dataflow.sdk.options.DataflowPipelineOptions;
 import com.google.cloud.dataflow.sdk.options.PipelineOptions;
 import com.google.cloud.dataflow.sdk.options.PipelineOptionsValidator;
@@ -47,6 +48,9 @@ import com.google.cloud.dataflow.sdk.values.POutput;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 
+import org.joda.time.DateTimeUtils;
+import org.joda.time.DateTimeZone;
+import org.joda.time.format.DateTimeFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,6 +66,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 /**
  * A {@link PipelineRunner} that executes the operations in the
@@ -162,18 +167,23 @@ public class DataflowPipelineRunner extends PipelineRunner<DataflowPipelineJob> 
   }
 
   @Override
-  @SuppressWarnings("unchecked")
   public <OutputT extends POutput, InputT extends PInput> OutputT apply(
       PTransform<InputT, OutputT> transform, InputT input) {
-    if (transform instanceof Combine.GroupedValues || transform instanceof GroupByKey) {
+    if (Combine.GroupedValues.class.equals(transform.getClass())
+        || GroupByKey.class.equals(transform.getClass())) {
       PCollection<?> pc = (PCollection<?>) input;
       // TODO: Redundant with translator registration?
-      return (OutputT) PCollection.createPrimitiveOutputInternal(
+      @SuppressWarnings("unchecked")
+      OutputT outputT = (OutputT) PCollection.createPrimitiveOutputInternal(
           pc.getPipeline(),
           pc.getWindowingStrategy(),
           pc.isBounded());
-    } else if (transform instanceof Create) {
-      return (OutputT) ((Create) transform).applyHelper(input, options.isStreaming());
+      return outputT;
+    } else if (Create.Values.class.equals(transform.getClass())) {
+      @SuppressWarnings({"unchecked", "rawtypes"})
+      OutputT output = (OutputT)
+          ((Create.Values) transform).applyHelper(input, options.isStreaming());
+      return output;
     } else {
       return super.apply(transform, input);
     }
@@ -188,14 +198,26 @@ public class DataflowPipelineRunner extends PipelineRunner<DataflowPipelineJob> 
     JobSpecification jobSpecification = translator.translate(pipeline, packages);
     Job newJob = jobSpecification.getJob();
 
+    // Set a unique client_request_id in the CreateJob request.
+    // This is used to ensure idempotence of job creation across retried
+    // attempts to create a job. Specifically, if the service returns a job with
+    // a different client_request_id, it means the returned one is a different
+    // job previously created with the same job name, and that the job creation
+    // has been effectively rejected. The SDK should return
+    // Error::Already_Exists to user in that case.
+    int randomNum = new Random().nextInt(9000) + 1000;
+    String requestId = DateTimeFormat.forPattern("YYYYMMddHHmmssmmm").withZone(DateTimeZone.UTC)
+        .print(DateTimeUtils.currentTimeMillis()) + "_" + randomNum;
+    newJob.setClientRequestId(requestId);
+
     String version = DataflowReleaseInfo.getReleaseInfo().getVersion();
     System.out.println("Dataflow SDK version: " + version);
 
     newJob.getEnvironment().setUserAgent(DataflowReleaseInfo.getReleaseInfo());
     // The Dataflow Service may write to the temporary directory directly, so
     // must be verified.
+    DataflowPipelineOptions dataflowOptions = options.as(DataflowPipelineOptions.class);
     if (!Strings.isNullOrEmpty(options.getTempLocation())) {
-      DataflowPipelineOptions dataflowOptions = options.as(DataflowPipelineOptions.class);
       newJob.getEnvironment().setTempStoragePrefix(
           dataflowOptions.getPathValidator().verifyPath(options.getTempLocation()));
     }
@@ -237,29 +259,44 @@ public class DataflowPipelineRunner extends PipelineRunner<DataflowPipelineJob> 
     if (options.getReload()) {
       reloadJobId = getJobIdFromName(options.getJobName());
     }
-
     Job jobResult;
     try {
-      Dataflow.V1b3.Projects.Jobs.Create createRequest =
-          dataflowClient.v1b3().projects().jobs()
+      Dataflow.Projects.Jobs.Create createRequest =
+          dataflowClient.projects().jobs()
           .create(options.getProject(), newJob);
       if (reloadJobId != null) {
         createRequest.setReplaceJobId(reloadJobId);
       }
       jobResult = createRequest.execute();
     } catch (GoogleJsonResponseException e) {
-      throw new RuntimeException(
-          "Failed to create a workflow job: "
-              + (e.getDetails() != null ? e.getDetails().getMessage() : e), e);
+        throw new RuntimeException("Failed to create a workflow job: "
+            + (e.getDetails() != null ? e.getDetails().getMessage() : e), e);
     } catch (IOException e) {
       throw new RuntimeException("Failed to create a workflow job", e);
+    }
+    // If the service returned client request id, the SDK needs to compare it
+    // with the original id generated in the request, if they are not the same
+    // (i.e., the returned job is not created by this request), throw
+    // Error::Already_Exists.
+    if (jobResult.getClientRequestId() != null && !jobResult.getClientRequestId().isEmpty()
+        && !jobResult.getClientRequestId().equals(requestId)) {
+      throw new RuntimeException("The job you are trying to create with name " + newJob.getName()
+          + " already exists and is active in system with job id: " + jobResult.getId()
+          + ". If you want to submit a new job in parallel, try again with a different name.");
     }
 
     LOG.info("To access the Dataflow monitoring console, please navigate to {}",
         MonitoringUtil.getJobMonitoringPageURL(options.getProject(), jobResult.getId()));
     System.out.println("Submitted job: " + jobResult.getId());
 
-    LOG.info("To cancel the job using the 'gcloud' tool, run:\n> {}",
+    boolean usingCustomApiRootUrl =
+        !DataflowPipelineDebugOptions.DEFAULT_API_ROOT.equals(dataflowOptions.getApiRootUrl());
+    final String setApiEndpointCommand =
+        (usingCustomApiRootUrl
+         ? MonitoringUtil.getEndpointOverridePrefixCommand(dataflowOptions.getApiRootUrl())
+         : "");
+    LOG.info("To cancel the job using the 'gcloud' tool, run:\n> {}{}",
+        setApiEndpointCommand,
         MonitoringUtil.getGcloudCancelCommand(options.getProject(), jobResult.getId()));
 
     // Obtain all of the extractors from the PTransforms used in the pipeline so the
@@ -341,7 +378,7 @@ public class DataflowPipelineRunner extends PipelineRunner<DataflowPipelineJob> 
       ListJobsResponse listResult;
       String token = null;
       do {
-        listResult = dataflowClient.v1b3().projects().jobs()
+        listResult = dataflowClient.projects().jobs()
             .list(options.getProject())
             .setPageToken(token)
             .execute();

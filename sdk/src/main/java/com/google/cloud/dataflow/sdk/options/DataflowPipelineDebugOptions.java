@@ -37,6 +37,12 @@ import java.util.List;
     + "debugging and testing purposes.")
 @Hidden
 public interface DataflowPipelineDebugOptions extends PipelineOptions {
+
+  /**
+   * The default endpoint  to use with the Dataflow API.
+   */
+  static final String DEFAULT_API_ROOT = "https://dataflow.googleapis.com/";
+
   /**
    * Dataflow endpoint to use.
    *
@@ -75,7 +81,7 @@ public interface DataflowPipelineDebugOptions extends PipelineOptions {
   @Description("The endpoint to use with the Dataflow API. dataflowEndpoint can override this "
       + "value if it contains an absolute URL, otherwise apiRootUrl will be combined with "
       + "dataflowEndpoint to generate the full URL to communicate with the Dataflow API.")
-  @Default.String("https://dataflow.googleapis.com/")
+  @Default.String(DEFAULT_API_ROOT)
   String getApiRootUrl();
   void setApiRootUrl(String value);
 
@@ -167,6 +173,14 @@ public interface DataflowPipelineDebugOptions extends PipelineOptions {
   @Experimental
   boolean getReload();
   void setReload(boolean value);
+
+  /**
+   * Root URL for use with the Pubsub API.
+   */
+  @Description("Root URL for use with the Pubsub API")
+  @Default.String("https://pubsub.googleapis.com")
+  String getPubsubRootUrl();
+  void setPubsubRootUrl(String value);
 
   /**
    * Creates a {@link PathValidator} object using the class specified in

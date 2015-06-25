@@ -99,8 +99,8 @@ public class CombineTest implements Serializable {
 
   PCollection<KV<String, Integer>> createInput(Pipeline p,
                                                KV<String, Integer>[] table) {
-    return p.apply(Create.of(Arrays.asList(table))).setCoder(
-        KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()));
+    return p.apply(Create.of(Arrays.asList(table)).withCoder(
+        KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())));
   }
 
   private void runTestSimpleCombine(KV<String, Integer>[] table,
@@ -203,8 +203,8 @@ public class CombineTest implements Serializable {
 
     PCollection<KV<String, Integer>> input =
         p.apply(Create.timestamped(Arrays.asList(TABLE),
-                                   Arrays.asList(0L, 1L, 6L, 7L, 8L)))
-         .setCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()))
+                                   Arrays.asList(0L, 1L, 6L, 7L, 8L))
+                .withCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())))
          .apply(Window.<KV<String, Integer>>into(FixedWindows.of(Duration.millis(2))));
 
     PCollection<Integer> sum = input
@@ -230,8 +230,8 @@ public class CombineTest implements Serializable {
 
     PCollection<KV<String, Integer>> input =
         p.apply(Create.timestamped(Arrays.asList(TABLE),
-                                   Arrays.asList(0L, 4L, 7L, 10L, 16L)))
-         .setCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of()))
+                                   Arrays.asList(0L, 4L, 7L, 10L, 16L))
+                .withCoder(KvCoder.of(StringUtf8Coder.of(), BigEndianIntegerCoder.of())))
          .apply(Window.<KV<String, Integer>>into(Sessions.withGapDuration(Duration.millis(5))));
 
     PCollection<Integer> sum = input
@@ -255,7 +255,7 @@ public class CombineTest implements Serializable {
     Pipeline p = TestPipeline.create();
 
     PCollection<Double> mean = p
-        .apply(Create.<Integer>of()).setCoder(BigEndianIntegerCoder.of())
+        .apply(Create.<Integer>of().withCoder(BigEndianIntegerCoder.of()))
         .apply(Window.<Integer>into(FixedWindows.of(Duration.millis(1))))
         .apply(Combine.globally(new MeanInts()).withoutDefaults());
 
@@ -335,11 +335,11 @@ public class CombineTest implements Serializable {
 
     KeyedCombineFn<String, Integer, ?, Double> mean =
         new MeanInts().<String>asKeyedFn();
-    PCollection<KV<String, Double>> coldMean = input.apply(
+    PCollection<KV<String, Double>> coldMean = input.apply("ColdMean",
         Combine.perKey(mean).withHotKeyFanout(0));
-    PCollection<KV<String, Double>> warmMean = input.apply(
+    PCollection<KV<String, Double>> warmMean = input.apply("WarmMean",
         Combine.perKey(mean).withHotKeyFanout(hotKeyFanout));
-    PCollection<KV<String, Double>> hotMean = input.apply(
+    PCollection<KV<String, Double>> hotMean = input.apply("HotMean",
         Combine.perKey(mean).withHotKeyFanout(5));
 
     List<KV<String, Double>> expected = Arrays.asList(KV.of("a", 2.0), KV.of("b", 7.0));
@@ -355,9 +355,9 @@ public class CombineTest implements Serializable {
     Pipeline p = TestPipeline.create();
     PCollection<KV<String, Integer>> input = copy(createInput(p, TABLE), 2);
     PCollection<KV<String, Integer>> intProduct = input
-        .apply(Combine.<String, Integer, Integer>perKey(new TestProdInt()));
+        .apply("IntProduct", Combine.<String, Integer, Integer>perKey(new TestProdInt()));
     PCollection<KV<String, Integer>> objProduct = input
-        .apply(Combine.<String, Integer, Integer>perKey(new TestProdObj()));
+        .apply("ObjProduct", Combine.<String, Integer, Integer>perKey(new TestProdObj()));
 
     List<KV<String, Integer>> expected = Arrays.asList(KV.of("a", 16), KV.of("b", 169));
     DataflowAssert.that(intProduct).containsInAnyOrder(expected);
@@ -408,20 +408,20 @@ public class CombineTest implements Serializable {
   public void testCombineGloballyAsSingletonView() {
     Pipeline p = TestPipeline.create();
     final PCollectionView<Integer> view = p
-        .apply(Create.<Integer>of())
-        .setCoder(BigEndianIntegerCoder.of())
+        .apply("CreateEmptySideInput", Create.<Integer>of().withCoder(BigEndianIntegerCoder.of()))
         .apply(Sum.integersGlobally().asSingletonView());
 
     PCollection<Integer> output = p
-        .apply(Create.of((Void) null))
-        .apply(ParDo.of(new DoFn<Void, Integer>() {
+        .apply("CreateVoidMainInput", Create.of((Void) null))
+        .apply("OutputSideInput", ParDo.of(new DoFn<Void, Integer>() {
                   @Override
                   public void processElement(ProcessContext c) {
                     c.output(c.sideInput(view));
                   }
-                }));
+                }).withSideInputs(view));
 
     DataflowAssert.thatSingleton(output).isEqualTo(0);
+    p.run();
   }
 
   ////////////////////////////////////////////////////////////////////////////
